@@ -8,7 +8,7 @@
 // 4. Forma de pagamento: pix ou na entrega
 //    - se pix, envia a chave e pede confirmação do comprovante
 // 5. Resumo enviado ao próprio número da loja (WHATSAPP_LOJA)
-
+require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
@@ -17,9 +17,9 @@ const { formatarCardapio, buscarItem } = require("./cardapio");
 
 // ---------- CONFIGURAÇÃO ----------
 // Número da loja (o mesmo que recebe o pedido final). Formato: DDI+DDD+numero, só dígitos.
-const NUMERO_LOJA = "5531985807406";
-const CHAVE_PIX = "31985807406";
-const CAMINHO_PDF_MENU = path.join(__dirname, "menu.pdf"); // opcional
+const NUMERO_LOJA = process.env.NUMERO_LOJA;
+const CHAVE_PIX = process.env.CHAVE_PIX;
+const CAMINHO_PDF_MENU = path.resolve(__dirname, process.env.CAMINHO_PDF_MENU);// opcional
 
 // ---------- ESTADO EM MEMÓRIA (por chat) ----------
 // Em produção troque isso por um banco (SQLite/Redis/Postgres) — ver README, seção "Próximos passos".
