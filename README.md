@@ -19,7 +19,7 @@ aprovação da API oficial da Meta — ótimo para prototipar rápido e barato).
 ## Como rodar
 
 **Pré-requisitos:** Node.js 18+ instalado e um número de WhatsApp dedicado à loja
-(pode ser o mesmo `31985807406` mencionado no código).
+(pode ser o mesmo `31999999999` mencionado no código).
 
 ```bash
 # 1. instale as dependências
