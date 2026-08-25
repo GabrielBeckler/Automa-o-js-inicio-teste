@@ -21,6 +21,17 @@ const NUMERO_LOJA = process.env.NUMERO_LOJA;
 const CHAVE_PIX = process.env.CHAVE_PIX;
 const CAMINHO_PDF_MENU = path.resolve(__dirname, process.env.CAMINHO_PDF_MENU);// opcional
 
+if (!NUMERO_LOJA) {
+  throw new Error("NUMERO_LOJA não foi configurado no .env");
+}
+
+if (!CHAVE_PIX) {
+  throw new Error("CHAVE_PIX não foi configurada no .env");
+}
+
+if (!CAMINHO_PDF_MENU) {
+  throw new Error("CAMINHO_PDF_MENU não foi configurado no .env");
+}
 // ---------- ESTADO EM MEMÓRIA (por chat) ----------
 // Em produção troque isso por um banco (SQLite/Redis/Postgres) — ver README, seção "Próximos passos".
 const sessoes = new Map();
@@ -34,10 +45,10 @@ function novaSessao() {
 }
 
 function getSessao(chatId) {
-  if (!sessoes.has(chatId)) sessoes.set(chatId, nSessao());
+  if (!sessoes.has(chatId)) sessoes.set(chatId, novaSessao());
   return sessoes.get(chatId);
 }
-ova
+
 function resetarSessao(chatId) {
   sessoes.set(chatId, novaSessao());
 }
@@ -144,7 +155,23 @@ async function tratarMensagem(client, chatId, texto, sessao, msg) {
     }
 
     case "quantidade": {
-      const qtd = parseInt(texto, 10);
+      if (!/^\d+$/.test(texto)) {
+        await client.sendMessage(
+          chatId,
+          "Me manda apenas um número. Exemplo: *1*, *2* ou *3*."
+        );
+        return;
+      }
+
+      const qtd = Number(texto);
+
+      if (qtd <= 0 || qtd > 50) {
+        await client.sendMessage(
+          chatId,
+          "A quantidade deve estar entre 1 e 50."
+        );
+        return;
+      }
       if (!qtd || qtd <= 0) {
         await client.sendMessage(chatId, "Me manda só o número da quantidade, ex: 1, 2, 3...");
         return;
@@ -161,6 +188,14 @@ async function tratarMensagem(client, chatId, texto, sessao, msg) {
     }
 
     case "nome": {
+      if (texto.length < 2 || texto.length > 100) {
+        await client.sendMessage(
+          chatId,
+          "Digite seu nome corretamente, por favor 😊"
+        );
+        return;
+      }
+
       sessao.cliente.nome = texto;
       sessao.etapa = "aniversario";
       await client.sendMessage(
@@ -171,9 +206,27 @@ async function tratarMensagem(client, chatId, texto, sessao, msg) {
     }
 
     case "aniversario": {
-      sessao.cliente.aniversario = textoLower === "pular" ? null : texto;
+      if (textoLower === "pular") {
+        sessao.cliente.aniversario = null;
+      } else {
+        if (!validarAniversario(texto)) {
+          await client.sendMessage(
+            chatId,
+            "Data inválida 😅 Use o formato *dd/mm*. Exemplo: *15/03*."
+          );
+          return;
+        }
+
+        sessao.cliente.aniversario = texto;
+      }
+
       sessao.etapa = "endereco";
-      await client.sendMessage(chatId, "Agora me manda o *endereço completo* para entrega (rua, número, bairro e referência).");
+
+      await client.sendMessage(
+        chatId,
+        "Agora me manda o *endereço completo* para entrega."
+      );
+
       break;
     }
 
