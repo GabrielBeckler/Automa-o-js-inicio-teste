@@ -11,8 +11,8 @@ aprovação da API oficial da Meta — ótimo para prototipar rápido e barato).
 2. Deixa o cliente escolher itens pelo número + quantidade, até digitar `fim`.
 3. Faz o "cadastro" perguntando nome, aniversário (opcional) e endereço.
 4. Pergunta a forma de pagamento (Pix ou na entrega). Se for Pix, envia a chave
-   `31985807406` e espera confirmação/comprovante.
-5. Envia o resumo do pedido para o próprio número da loja (`31985807406`), com
+   `31999999999` e espera confirmação/comprovante.
+5. Envia o resumo do pedido para o próprio número da loja (`31999999999`), com
    nome, telefone, endereço, itens e total.
 6. A qualquer momento o cliente pode digitar `cancelar` para recomeçar.
 
