@@ -28,7 +28,7 @@ function atrasoAleatorio(min = 1000, max = 2500) {
  */
 function extrairNumeroWhatsApp(chatId) {
     if (!chatId || typeof chatId !== "string") return "";
-    return chatId.replace(/@c\.us|@g\.us/g, "");
+    return chatId.replace(/@c\.us|@g\.us|@lid|@s\.whatsapp\.net/g, "");
 }
 
 module.exports = {

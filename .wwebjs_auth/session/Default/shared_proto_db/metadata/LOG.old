@@ -1,3 +1,2 @@
-2026/08/26-21:43:27.421 395dd Reusing MANIFEST /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/shared_proto_db/metadata/MANIFEST-000001
-2026/08/26-21:43:27.421 395dd Recovering log #3
-2026/08/26-21:43:27.422 395dd Reusing old log /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/shared_proto_db/metadata/000003.log 
+2026/08/27-20:21:31.568 61730 Creating DB /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/shared_proto_db/metadata since it was missing.
+2026/08/27-20:21:31.572 61730 Reusing MANIFEST /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/shared_proto_db/metadata/MANIFEST-000001

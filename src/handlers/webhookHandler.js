@@ -140,7 +140,7 @@ async function processarWebhookPagamento(evento) {
     const sessao = getSessao(chatId);
 
     // 2. Verificar se o pedido já foi despachado (Prevenção de duplicidade)
-    if (sessao.pedidoEnviadoParaGrupo || sessao.pedidoFinalizado) {
+    if (sessao.pedidoEnviadoParaNumero || sessao.pedidoFinalizado) {
         console.log(`⚠️ [Webhook] Pedido do cliente ${sessao.cliente?.nome} (${chatId}) já foi despachado anteriormente. Evitando envio duplicado.`);
         removerPagamentoPendente(pagamentoId);
         return;

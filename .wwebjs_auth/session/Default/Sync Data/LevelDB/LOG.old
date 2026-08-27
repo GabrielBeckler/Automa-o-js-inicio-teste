@@ -1,3 +1,2 @@
-2026/08/26-21:43:27.356 395df Reusing MANIFEST /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/Sync Data/LevelDB/MANIFEST-000001
-2026/08/26-21:43:27.357 395df Recovering log #3
-2026/08/26-21:43:27.357 395df Reusing old log /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/Sync Data/LevelDB/000003.log 
+2026/08/27-20:21:31.511 6172c Creating DB /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/Sync Data/LevelDB since it was missing.
+2026/08/27-20:21:31.515 6172c Reusing MANIFEST /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/Sync Data/LevelDB/MANIFEST-000001

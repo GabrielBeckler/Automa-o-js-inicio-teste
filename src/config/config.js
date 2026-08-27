@@ -21,8 +21,7 @@ const config = {
         port: Number(process.env.PORT) || 3000
     },
     whatsapp: {
-        grupoPedidosNome: process.env.NOME_GRUPO_PEDIDOS || "pedidos",
-        grupoPedidosId: process.env.ID_GRUPO_PEDIDOS || null
+        numeroPedidos: process.env.NUMERO_PEDIDOS
     },
     paths: {
         caminhoMenu: path.resolve(
@@ -55,6 +54,10 @@ function validarConfiguracao() {
 
     if (!config.abacatePay.publicKey || config.abacatePay.publicKey.trim() === "") {
         throw new Error("Configuração ausente: ABACATEPAY_PUBLIC_KEY não foi configurada no .env");
+    }
+
+    if (!config.whatsapp.numeroPedidos) {
+        throw new Error("Configuração ausente: NUMERO_PEDIDOS não foi configurado no .env");
     }
 }
 
