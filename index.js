@@ -1,17 +1,14 @@
-// index.js
-// Bot de atendimento para sorveteria via WhatsApp (whatsapp-web.js).
-
-// Fluxo:
-// 1. Saudação inicial + envio do cardápio
-// 2. Cliente monta o pedido digitando os números dos itens
-// 3. Cadastro: nome, aniversário (opcional), endereço
-// 4. Forma de pagamento: Pix ou pagamento na entrega
-// 5. Resumo enviado para o número da loja
+// ============================================================
+// BOT DE ATENDIMENTO - SORVETERIA
+// WhatsApp + AbacatePay PIX
+// ============================================================
 
 require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const express = require("express");
 
 const {
     Client,
@@ -30,157 +27,347 @@ const {
 // CONFIGURAÇÃO
 // ============================================================
 
-// Número da loja.
-// Formato: DDI + DDD + número, somente números.
-// Exemplo: 5531999999999
-const NUMERO_LOJA = process.env.NUMERO_LOJA;
+const NUMERO_LOJA =
+    process.env.NUMERO_LOJA;
 
-// Chave Pix
-const CHAVE_PIX = process.env.CHAVE_PIX;
+const ABACATEPAY_API_KEY =
+    process.env.ABACATEPAY_API_KEY;
 
-// Caminho da imagem do cardápio
-const CAMINHO_MENU = path.resolve(
-    __dirname,
-    "img/menu/menu.png"
-);
+const ABACATEPAY_WEBHOOK_SECRET =
+    process.env.ABACATEPAY_WEBHOOK_SECRET;
 
-const NUMERO_TESTE = process.env.NUMERO_TESTE;
+const DEFAULT_ABACATEPAY_PUBLIC_KEY =
+    "t9dXRhHHo3yDEj5pVDYz0frf7q6bMKyMRmxxCPIPp3RCplBfXRxqlC6ZpiWmOqj4L63qEaeUOtrCI8P0VMUgo6iIga2ri9ogaHFs0WIIywSMg0q7RmBfybe1E5XJcfC4IW3alNqym0tXoAKkzvfEjZxV6bE0oG2zJrNNYmUCKZyV0KZ3JS8Votf9EAWWYdiDkMkpbMdPggfh1EqHlVkMiTady6jOR3hyzGEHrIz2Ret0xHKMbiqkr9HS1JhNHDX9";
+
+const ABACATEPAY_PUBLIC_KEY =
+    (process.env.ABACATEPAY_PUBLIC_KEY && process.env.ABACATEPAY_PUBLIC_KEY.trim() !== "")
+        ? process.env.ABACATEPAY_PUBLIC_KEY.trim()
+        : DEFAULT_ABACATEPAY_PUBLIC_KEY;
+
+const PORT =
+    Number(process.env.PORT) || 3000;
+
+const CAMINHO_MENU =
+    path.resolve(
+        __dirname,
+        "img/menu/menu.png"
+    );
 
 // ============================================================
-// VALIDAÇÃO DA CONFIGURAÇÃO
+// VALIDAÇÕES DE CONFIGURAÇÃO
 // ============================================================
 
-if (!NUMERO_LOJA) {
-    throw new Error(
-        "NUMERO_LOJA não foi configurado no arquivo .env"
-    );
+function validarConfiguracao() {
+
+    if (!NUMERO_LOJA) {
+        throw new Error(
+            "NUMERO_LOJA não foi configurado no .env"
+        );
+    }
+
+    if (!/^\d+$/.test(NUMERO_LOJA)) {
+        throw new Error(
+            "NUMERO_LOJA deve conter apenas números."
+        );
+    }
+
+    if (
+        !ABACATEPAY_API_KEY ||
+        ABACATEPAY_API_KEY.trim() === ""
+    ) {
+        throw new Error(
+            "ABACATEPAY_API_KEY não foi configurada no .env"
+        );
+    }
+
+    if (
+        !ABACATEPAY_WEBHOOK_SECRET ||
+        ABACATEPAY_WEBHOOK_SECRET.trim() === ""
+    ) {
+        throw new Error(
+            "ABACATEPAY_WEBHOOK_SECRET não foi configurado no .env"
+        );
+    }
+
+    if (
+        !ABACATEPAY_PUBLIC_KEY ||
+        ABACATEPAY_PUBLIC_KEY.trim() === ""
+    ) {
+        throw new Error(
+            "ABACATEPAY_PUBLIC_KEY não foi configurada."
+        );
+    }
 }
-
-if (!/^\d+$/.test(NUMERO_LOJA)) {
-    throw new Error(
-        "NUMERO_LOJA deve conter apenas números."
-    );
-}
-
-if (!CHAVE_PIX || CHAVE_PIX.trim() === "") {
-    throw new Error(
-        "CHAVE_PIX não foi configurada no arquivo .env"
-    );
-}
-
-if (!NUMERO_TESTE) {
-    throw new Error(
-        "NUMERO_TESTE não foi configurado no arquivo .env"
-    );
-}
-
-if (!/^\d+$/.test(NUMERO_TESTE)) {
-    throw new Error(
-        "NUMERO_TESTE deve conter apenas números."
-    );
-}
-
-// Verifica o cardápio apenas como aviso.
-// O bot consegue continuar usando o cardápio em texto.
-if (!fs.existsSync(CAMINHO_MENU)) {
-    console.warn(
-        "⚠️ Cardápio em imagem não encontrado:"
-    );
-
-    console.warn(CAMINHO_MENU);
-
-    console.warn(
-        "O bot continuará usando o cardápio em texto."
-    );
-}
-
 
 // ============================================================
-// ESTADO EM MEMÓRIA
+// ABACATEPAY
 // ============================================================
 
-// Em produção, o ideal é utilizar banco de dados.
-// Por enquanto, as sessões ficam em memória.
+// O pacote @abacatepay/sdk@2.x é ESM.
+//
+// Como este arquivo usa CommonJS,
+// fazemos import() dinamicamente.
+//
+// Não use:
+// const { AbacatePay } = require("@abacatepay/sdk");
+
+let abacate = null;
+
+async function inicializarAbacatePay() {
+
+    const {
+        AbacatePay
+    } = await import("@abacatepay/sdk");
+
+    abacate = AbacatePay({
+        secret: ABACATEPAY_API_KEY
+    });
+
+    console.log(
+        "🥑 AbacatePay SDK inicializado."
+    );
+}
+
+// ============================================================
+// CARDÁPIO
+// ============================================================
+
+function verificarCardapio() {
+
+    if (!fs.existsSync(CAMINHO_MENU)) {
+
+        console.warn(
+            "⚠️ Cardápio em imagem não encontrado:"
+        );
+
+        console.warn(
+            CAMINHO_MENU
+        );
+
+        console.warn(
+            "O bot continuará usando o cardápio em texto."
+        );
+
+        return;
+    }
+
+    console.log(
+        "📋 Cardápio encontrado:"
+    );
+
+    console.log(
+        CAMINHO_MENU
+    );
+}
+
+// ============================================================
+// SESSÕES
+// ============================================================
 
 const sessoes = new Map();
 
-// Guarda os IDs das mensagens já processadas
-const mensagensProcessadas = new Map();
+// ============================================================
+// MENSAGENS PROCESSADAS
+// ============================================================
 
-// Tempo que vamos manter o ID na memória
-const TEMPO_EXPIRACAO_MENSAGEM = 5 * 60 * 1000; // 5 minutos
+const mensagensProcessadas =
+    new Map();
+
+const TEMPO_EXPIRACAO_MENSAGEM =
+    5 * 60 * 1000;
 
 // ============================================================
-// SESSÃO
+// EVENTOS WEBHOOK PROCESSADOS
+// ============================================================
+
+const eventosProcessados =
+    new Map();
+
+const TEMPO_EXPIRACAO_EVENTO =
+    60 * 60 * 1000;
+
+// ============================================================
+// PAGAMENTOS PENDENTES
+// ============================================================
+
+// paymentId -> chatId
+
+const pagamentosPendentes =
+    new Map();
+
+// ============================================================
+// FUNÇÕES AUXILIARES
 // ============================================================
 
 function esperar(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+
+    return new Promise(
+        resolve => setTimeout(resolve, ms)
+    );
 }
 
 function atrasoAleatorio(min, max) {
+
     return Math.floor(
         Math.random() * (max - min + 1)
     ) + min;
 }
 
+// ============================================================
+// SESSÃO
+// ============================================================
+
 function novaSessao() {
+
     return {
+
         etapa: "inicio",
 
         pedido: [],
 
         cliente: {
+
             nome: null,
+
             aniversario: null,
+
             endereco: null,
+
             pagamento: null
+
         },
 
-        _itemPendente: null
+        itemPendente: null,
+
+        pagamento: {
+
+            id: null,
+
+            status: null,
+
+            brCode: null,
+
+            brCodeBase64: null,
+
+            expiresAt: null
+
+        },
+
+        pedidoFinalizado: false
+
     };
 }
 
-
 function getSessao(chatId) {
+
     if (!sessoes.has(chatId)) {
-        sessoes.set(chatId, novaSessao());
+
+        sessoes.set(
+            chatId,
+            novaSessao()
+        );
     }
 
     return sessoes.get(chatId);
 }
 
-
 function resetarSessao(chatId) {
-    sessoes.set(chatId, novaSessao());
+
+    sessoes.set(
+        chatId,
+        novaSessao()
+    );
 }
 
+// ============================================================
+// MENSAGEM DUPLICADA
+// ============================================================
+
 function mensagemJaProcessada(msg) {
-    const id = msg?.id?.id;
+
+    const id =
+        msg?.id?.id;
 
     if (!id) {
         return false;
     }
 
-    const agora = Date.now();
+    const agora =
+        Date.now();
 
-    // Remove IDs antigos
-    for (const [mensagemId, timestamp] of mensagensProcessadas) {
+    for (
+        const [
+            mensagemId,
+            timestamp
+        ] of mensagensProcessadas
+    ) {
+
         if (
             agora - timestamp >
             TEMPO_EXPIRACAO_MENSAGEM
         ) {
-            mensagensProcessadas.delete(mensagemId);
+
+            mensagensProcessadas.delete(
+                mensagemId
+            );
         }
     }
 
-    // Se já processamos essa mensagem
-    if (mensagensProcessadas.has(id)) {
+    if (
+        mensagensProcessadas.has(id)
+    ) {
+
         return true;
     }
 
-    // Marca como processada
-    mensagensProcessadas.set(id, agora);
+    mensagensProcessadas.set(
+        id,
+        agora
+    );
+
+    return false;
+}
+
+// ============================================================
+// EVENTO WEBHOOK DUPLICADO
+// ============================================================
+
+function eventoJaProcessado(eventId) {
+
+    if (!eventId) {
+        return false;
+    }
+
+    const agora =
+        Date.now();
+
+    for (
+        const [
+            id,
+            timestamp
+        ] of eventosProcessados
+    ) {
+
+        if (
+            agora - timestamp >
+            TEMPO_EXPIRACAO_EVENTO
+        ) {
+
+            eventosProcessados.delete(id);
+        }
+    }
+
+    if (
+        eventosProcessados.has(eventId)
+    ) {
+
+        return true;
+    }
+
+    eventosProcessados.set(
+        eventId,
+        agora
+    );
 
     return false;
 }
@@ -190,76 +377,147 @@ function mensagemJaProcessada(msg) {
 // ============================================================
 
 function totalPedido(pedido) {
+
+    if (
+        !Array.isArray(pedido)
+    ) {
+
+        return 0;
+    }
+
     return pedido.reduce(
-        (soma, item) =>
-            soma + item.preco * item.quantidade,
+        (soma, item) => {
+
+            const preco =
+                Number(item.preco);
+
+            const quantidade =
+                Number(item.quantidade);
+
+            if (
+                !Number.isFinite(preco) ||
+                !Number.isFinite(quantidade)
+            ) {
+
+                return soma;
+            }
+
+            return soma +
+                preco * quantidade;
+
+        },
         0
     );
 }
 
+// ============================================================
+// RESUMO PEDIDO
+// ============================================================
 
 function resumoPedido(pedido) {
-    if (!pedido || pedido.length === 0) {
+
+    if (
+        !Array.isArray(pedido) ||
+        pedido.length === 0
+    ) {
+
         return "Nenhum item no pedido.";
     }
 
     return pedido
-        .map(
-            (item) =>
+        .map(item => {
+
+            const subtotal =
+                Number(item.preco) *
+                Number(item.quantidade);
+
+            return (
                 `- ${item.quantidade}x ${item.nome} ` +
-                `(R$ ${(item.preco * item.quantidade).toFixed(2)})`
-        )
+                `(R$ ${subtotal.toFixed(2)})`
+            );
+
+        })
         .join("\n");
 }
 
-
 // ============================================================
-// VALIDAÇÕES
+// VALIDAÇÃO DE ANIVERSÁRIO
 // ============================================================
 
 function validarAniversario(data) {
 
-    // Formato obrigatório: dd/mm
-    if (!/^\d{2}\/\d{2}$/.test(data)) {
+    if (
+        typeof data !== "string"
+    ) {
+
         return false;
     }
 
-    const [dia, mes] = data
+    // Formato: dd/mm
+
+    if (
+        !/^\d{2}\/\d{2}$/.test(data)
+    ) {
+
+        return false;
+    }
+
+    const [
+        dia,
+        mes
+    ] = data
         .split("/")
         .map(Number);
 
-    if (mes < 1 || mes > 12) {
+    if (
+        mes < 1 ||
+        mes > 12
+    ) {
+
         return false;
     }
 
     const diasPorMes = [
-        31, // janeiro
-        29, // fevereiro
-        31, // março
-        30, // abril
-        31, // maio
-        30, // junho
-        31, // julho
-        31, // agosto
-        30, // setembro
-        31, // outubro
-        30, // novembro
-        31  // dezembro
+
+        31,
+
+        29,
+
+        31,
+
+        30,
+
+        31,
+
+        30,
+
+        31,
+
+        31,
+
+        30,
+
+        31,
+
+        30,
+
+        31
+
     ];
 
     if (
         dia < 1 ||
         dia > diasPorMes[mes - 1]
     ) {
+
         return false;
     }
 
     return true;
 }
 
-
 // ============================================================
-// ENVIO SEGURO DE MENSAGENS
+// ENVIO SEGURO
 // ============================================================
 
 async function enviarMensagem(
@@ -268,23 +526,28 @@ async function enviarMensagem(
     conteudo,
     opcoes = {}
 ) {
+
     try {
+
         if (!client) {
+
             throw new Error(
-                "Cliente do WhatsApp não está disponível."
+                "Cliente do WhatsApp indisponível."
             );
         }
 
         if (!chatId) {
+
             throw new Error(
                 "Chat ID não informado."
             );
         }
 
-        const atraso = atrasoAleatorio(
-            1000,
-            2500
-        );
+        const atraso =
+            atrasoAleatorio(
+                1000,
+                2500
+            );
 
         await esperar(atraso);
 
@@ -295,6 +558,7 @@ async function enviarMensagem(
         );
 
     } catch (err) {
+
         console.error(
             "❌ Erro ao enviar mensagem."
         );
@@ -311,192 +575,190 @@ async function enviarMensagem(
 }
 
 // ============================================================
-// CLIENTE WHATSAPP
+// CRIAR PIX
 // ============================================================
 
-const client = new Client({
+async function criarPagamentoPix(
+    sessao,
+    chatId
+) {
 
-    authStrategy: new LocalAuth(),
-
-    puppeteer: {
-        headless: true,
-        args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox"
-        ]
-    }
-
-});
-
-
-// ============================================================
-// EVENTOS DO WHATSAPP
-// ============================================================
-
-client.on("qr", (qr) => {
-
-    console.log(
-        "📱 Escaneie o QR Code abaixo com o WhatsApp da sorveteria:"
-    );
-
-    qrcode.generate(
-        qr,
-        {
-            small: true
-        }
-    );
-});
-
-
-client.on("authenticated", () => {
-
-    console.log(
-        "🔐 WhatsApp autenticado com sucesso."
-    );
-});
-
-
-client.on("ready", () => {
-
-    console.log(
-        "================================"
-    );
-
-    console.log(
-        "🍦 BOT DA SORVETERIA"
-    );
-
-    console.log(
-        "✅ WhatsApp conectado!"
-    );
-
-    console.log(
-        "================================"
-    );
-});
-
-
-client.on("auth_failure", (msg) => {
-
-    console.error(
-        "❌ Falha na autenticação do WhatsApp:"
-    );
-
-    console.error(msg);
-});
-
-
-client.on("disconnected", (reason) => {
-
-    console.warn(
-        "⚠️ WhatsApp foi desconectado."
-    );
-
-    console.warn(
-        "Motivo:",
-        reason
-    );
-});
-
-
-client.on("change_state", (state) => {
-
-    console.log(
-        "📱 Estado do WhatsApp:",
-        state
-    );
-});
-
-
-client.on(
-    "loading_screen",
-    (percent, message) => {
-
-        console.log(
-            `⏳ Carregando WhatsApp: ${percent}% - ${message}`
-        );
-    }
-);
-
-
-// ============================================================
-// RECEBIMENTO DE MENSAGENS
-// ============================================================
-
-client.on("message", async (msg) => {
     try {
 
-        // ================================================
-        // IGNORA MENSAGENS DUPLICADAS
-        // ================================================
+        if (!abacate) {
 
-        if (mensagemJaProcessada(msg)) {
-            console.log(
-                `⚠️ Mensagem duplicada ignorada: ${msg.id?.id}`
+            throw new Error(
+                "AbacatePay ainda não foi inicializado."
+            );
+        }
+
+        const total =
+            totalPedido(
+                sessao.pedido
             );
 
-            return;
-        }
-
-
-        // ================================================
-        // IGNORA GRUPOS
-        // ================================================
-
         if (
-            msg.from &&
-            msg.from.endsWith("@g.us")
+            !Number.isFinite(total) ||
+            total <= 0
         ) {
-            return;
+
+            throw new Error(
+                "Valor do pedido inválido."
+            );
         }
 
+        // AbacatePay trabalha em centavos.
 
-        // ================================================
-        // IGNORA MENSAGENS DA PRÓPRIA LOJA
-        // ================================================
+        const valorCentavos =
+            Math.round(
+                total * 100
+            );
 
-        if (
-            msg.from ===
-            `${NUMERO_LOJA}@c.us`
-        ) {
-            return;
-        }
-
-        // ================================================
-        // MODO TESTE
-        // SOMENTE O NUMERO_TESTE PODE USAR O BOT
-        // ================================================
-
-  //      if (msg.from !== `${NUMERO_TESTE}@c.us`) {
-  //          console.log(
-   //             `🚫 Mensagem ignorada de número não autorizado: ${msg.from}`
-   //         );
-//
-     //       return;
-    //    }
-
-        const chatId = msg.from;
-
-        const texto = (
-            msg.body || ""
-        ).trim();
-
-        const sessao = getSessao(chatId);
-
+        const externalId =
+            `pedido_${Date.now()}_${chatId.replace("@c.us", "")}`;
 
         console.log(
-            `📩 Mensagem recebida [${msg.id?.id}]: "${texto}"`
+            "💳 Criando cobrança PIX..."
         );
 
-
-        await tratarMensagem(
-            client,
-            chatId,
-            texto,
-            sessao,
-            msg
+        console.log(
+            "Valor:",
+            valorCentavos,
+            "centavos"
         );
 
+        const resposta =
+            await abacate.pix.create({
+
+                amount:
+                    valorCentavos,
+
+                expiresIn:
+                    30 * 60,
+
+                description:
+                    "Pedido Sorveteria",
+
+                metadata: {
+
+                    chatId,
+
+                    externalId,
+
+                    nome:
+                        sessao.cliente.nome,
+
+                    endereco:
+                        sessao.cliente.endereco
+
+                }
+
+            });
+
+        // ====================================================
+        // IMPORTANTE
+        // O SDK retorna { data, error, success }
+        // e não deve ser tratado apenas via try/catch.
+        // ====================================================
+
+        if (
+            !resposta ||
+            resposta.success !== true
+        ) {
+
+            console.error(
+                "❌ AbacatePay retornou erro:"
+            );
+
+            console.error(
+                resposta?.error ||
+                resposta
+            );
+
+            const msgErro =
+                typeof resposta?.error === "string"
+                    ? resposta.error
+                    : (resposta?.error?.message || "Não foi possível criar o PIX.");
+
+            throw new Error(msgErro);
+        }
+
+        const pix =
+            resposta.data;
+
+        if (!pix) {
+
+            throw new Error(
+                "AbacatePay não retornou os dados do PIX."
+            );
+        }
+
+        if (!pix.id) {
+
+            throw new Error(
+                "AbacatePay não retornou o ID do PIX."
+            );
+        }
+
+        if (!pix.brCode) {
+
+            throw new Error(
+                "AbacatePay não retornou o código PIX."
+            );
+        }
+
+        // ====================================================
+        // SALVA NA SESSÃO
+        // ====================================================
+
+        sessao.pagamento = {
+
+            id:
+                pix.id,
+
+            status:
+                pix.status || "PENDING",
+
+            brCode:
+                pix.brCode,
+
+            brCodeBase64:
+                pix.brCodeBase64 || null,
+
+            expiresAt:
+                pix.expiresAt || null
+
+        };
+
+        // ====================================================
+        // MAPA DE PAGAMENTO
+        // ====================================================
+
+        pagamentosPendentes.set(
+            pix.id,
+            chatId
+        );
+
+        console.log(
+            "✅ PIX criado:"
+        );
+
+        console.log(
+            "ID:",
+            pix.id
+        );
+
+        console.log(
+            "Status:",
+            pix.status
+        );
+
+        console.log(
+            "External ID:",
+            pix.externalId || externalId
+        );
+
+        return pix;
 
     } catch (err) {
 
@@ -505,17 +767,7 @@ client.on("message", async (msg) => {
         );
 
         console.error(
-            "❌ ERRO AO TRATAR MENSAGEM"
-        );
-
-        console.error(
-            "Chat:",
-            msg?.from
-        );
-
-        console.error(
-            "Mensagem:",
-            msg?.body
+            "❌ ERRO AO CRIAR PIX"
         );
 
         console.error(err);
@@ -524,22 +776,594 @@ client.on("message", async (msg) => {
             "================================"
         );
 
+        throw err;
+    }
+}
+
+// ============================================================
+// ENVIA PIX PARA CLIENTE
+// ============================================================
+
+async function enviarPix(
+    client,
+    chatId,
+    sessao
+) {
+
+    const pix =
+        await criarPagamentoPix(
+            sessao,
+            chatId
+        );
+
+    const total =
+        totalPedido(
+            sessao.pedido
+        );
+
+    // ========================================================
+    // QR CODE
+    // ========================================================
+
+    if (
+        pix.brCodeBase64
+    ) {
+
+        try {
+
+            const base64 =
+                pix.brCodeBase64.replace(
+                    /^data:image\/\w+;base64,/,
+                    ""
+                );
+
+            const media =
+                new MessageMedia(
+                    "image/png",
+                    base64,
+                    "pix.png"
+                );
+
+            await enviarMensagem(
+                client,
+                chatId,
+                media,
+                {
+
+                    caption:
+                        "💳 *Pagamento via PIX*\n\n" +
+
+                        `Valor: *R$ ${total.toFixed(2)}*\n\n` +
+
+                        "Escaneie o QR Code acima " +
+                        "ou use o código copia e cola abaixo.\n\n" +
+
+                        "⏳ O pagamento fica disponível por 30 minutos."
+
+                }
+            );
+
+        } catch (err) {
+
+            console.error(
+                "⚠️ Não foi possível enviar QR Code."
+            );
+
+            console.error(err);
+
+            // Continua enviando o copia e cola.
+        }
+    }
+
+    // ========================================================
+    // COPIA E COLA
+    // ========================================================
+
+    await enviarMensagem(
+        client,
+        chatId,
+
+        "📋 *PIX Copia e Cola*\n\n" +
+
+        "```" +
+        pix.brCode +
+        "```\n\n" +
+
+        `💰 Valor: *R$ ${total.toFixed(2)}*\n\n` +
+
+        "Depois que o pagamento for confirmado, " +
+        "seu pedido será enviado automaticamente para a loja. ✅"
+    );
+
+    sessao.etapa =
+        "aguardando_pix";
+
+    return pix;
+}
+
+// ============================================================
+// VERIFICAR ASSINATURA WEBHOOK
+// ============================================================
+
+function verificarAssinaturaWebhook(
+    rawBody,
+    assinatura
+) {
+
+    if (
+        !assinatura
+    ) {
+
+        return false;
+    }
+
+    if (
+        !ABACATEPAY_PUBLIC_KEY
+    ) {
+
+        console.error(
+            "❌ ABACATEPAY_PUBLIC_KEY não configurada."
+        );
+
+        return false;
+    }
+
+    try {
+
+        const assinaturaEsperada =
+            crypto
+                .createHmac(
+                    "sha256",
+                    ABACATEPAY_PUBLIC_KEY
+                )
+                .update(
+                    Buffer.from(
+                        rawBody,
+                        "utf8"
+                    )
+                )
+                .digest("base64");
+
+        const A =
+            Buffer.from(
+                assinaturaEsperada,
+                "utf8"
+            );
+
+        const B =
+            Buffer.from(
+                assinatura,
+                "utf8"
+            );
+
+        if (
+            A.length !== B.length
+        ) {
+
+            return false;
+        }
+
+        return crypto.timingSafeEqual(
+            A,
+            B
+        );
+
+    } catch (err) {
+
+        console.error(
+            "❌ Erro ao validar assinatura do webhook:",
+            err.message
+        );
+
+        return false;
+    }
+}
+
+// ============================================================
+// PROCESSAR PAGAMENTO CONFIRMADO
+// ============================================================
+
+async function processarPagamentoConfirmado(
+    evento
+) {
+
+    try {
+
+        const dados =
+            evento?.data;
+
+        if (!dados) {
+
+            console.error(
+                "❌ Webhook sem data."
+            );
+
+            return;
+        }
+
+        // ====================================================
+        // NA API V2:
+        //
+        // data.pixQrCode.id ou data.transparent.id ou data.pix.id
+        //
+        // ====================================================
+
+        const pixData =
+            dados.pixQrCode ||
+            dados.pix ||
+            dados.transparent ||
+            dados.billing ||
+            dados;
+
+        const pagamentoId =
+            pixData?.id ||
+            dados?.id ||
+            dados?.pixQrCode?.id ||
+            dados?.transparent?.id;
+
+        if (!pagamentoId) {
+
+            console.error(
+                "❌ Webhook sem ID do pagamento."
+            );
+
+            console.error(
+                JSON.stringify(
+                    evento,
+                    null,
+                    2
+                )
+            );
+
+            return;
+        }
+
+        let chatId =
+            pagamentosPendentes.get(
+                pagamentoId
+            );
+
+        // Fallback: tentar recuperar chatId dos metadados
+        if (!chatId) {
+            chatId =
+                dados?.metadata?.chatId ||
+                pixData?.metadata?.chatId ||
+                evento?.metadata?.chatId;
+        }
+
+        // Fallback: buscar na sessão ativa pelo ID do pagamento
+        if (!chatId) {
+            for (const [id, s] of sessoes.entries()) {
+                if (s?.pagamento?.id === pagamentoId) {
+                    chatId = id;
+                    break;
+                }
+            }
+        }
+
+        if (!chatId) {
+
+            console.warn(
+                "⚠️ Pagamento recebido, mas não encontrei o chat."
+            );
+
+            console.warn(
+                "Pagamento:",
+                pagamentoId
+            );
+
+            console.warn(
+                "External ID:",
+                pixData?.externalId || dados?.externalId
+            );
+
+            return;
+        }
+
+        const sessao =
+            sessoes.get(
+                chatId
+            );
+
+        if (!sessao) {
+
+            console.warn(
+                "⚠️ Sessão do cliente não encontrada."
+            );
+
+            return;
+        }
+
+        // ====================================================
+        // EVITA DUPLICAR PEDIDO
+        // ====================================================
+
+        if (
+            sessao.pedidoFinalizado
+        ) {
+
+            console.log(
+                "⚠️ Pedido já finalizado."
+            );
+
+            pagamentosPendentes.delete(
+                pagamentoId
+            );
+
+            return;
+        }
+
+        // ====================================================
+        // CONFIRMA PAGAMENTO
+        // ====================================================
+
+        sessao.pagamento.status =
+            "PAID";
+
+        sessao.pedidoFinalizado =
+            true;
+
+        sessao.etapa =
+            "pagamento_confirmado";
+
+        console.log(
+            "================================"
+        );
+
+        console.log(
+            "💰 PAGAMENTO PIX CONFIRMADO"
+        );
+
+        console.log(
+            "PIX:",
+            pagamentoId
+        );
+
+        console.log(
+            "Cliente:",
+            sessao.cliente.nome
+        );
+
+        console.log(
+            "================================"
+        );
+
+        // ====================================================
+        // AVISA CLIENTE
+        // ====================================================
+
+        await enviarMensagem(
+            client,
+            chatId,
+
+            "✅ *Pagamento confirmado!*\n\n" +
+
+            "Seu PIX foi recebido com sucesso. 💳\n\n" +
+
+            "Agora vamos enviar seu pedido para a loja. 🍦"
+        );
+
+        // ====================================================
+        // ENVIA PEDIDO PARA LOJA
+        // ====================================================
+
+        await enviarPedidoParaLoja(
+            client,
+            chatId,
+            sessao
+        );
+
+        // ====================================================
+        // FINALIZA
+        // ====================================================
+
+        sessao.etapa =
+            "finalizado";
+
+        pagamentosPendentes.delete(
+            pagamentoId
+        );
+
+    } catch (err) {
+
+        console.error(
+            "================================"
+        );
+
+        console.error(
+            "❌ ERRO AO PROCESSAR PAGAMENTO"
+        );
+
+        console.error(err);
+
+        console.error(
+            "================================"
+        );
+    }
+}
+
+// ============================================================
+// ENVIAR PEDIDO PARA LOJA
+// ============================================================
+
+async function enviarPedidoParaLoja(
+    client,
+    chatId,
+    sessao
+) {
+
+    const total =
+        totalPedido(
+            sessao.pedido
+        );
+
+    const c =
+        sessao.cliente;
+
+    const numeroCliente =
+        chatId.replace(
+            "@c.us",
+            ""
+        );
+
+    const mensagemLoja =
+
+        "🍦 *NOVO PEDIDO*\n\n" +
+
+        `Cliente: ${c.nome}\n` +
+
+        `WhatsApp: ${numeroCliente}\n` +
+
+        `Aniversário: ${
+            c.aniversario ||
+            "não informado"
+        }\n` +
+
+        `Endereço: ${c.endereco}\n` +
+
+        `Pagamento: ${c.pagamento}\n` +
+
+        "Status: PAGO ✅\n\n" +
+
+        "Itens:\n" +
+
+        resumoPedido(
+            sessao.pedido
+        ) +
+
+        "\n\n" +
+
+        `*Total: R$ ${total.toFixed(2)}*`;
+
+    const chatLoja =
+        `${NUMERO_LOJA}@c.us`;
+
+    await enviarMensagem(
+        client,
+        chatLoja,
+        mensagemLoja
+    );
+
+    console.log(
+        "✅ Pedido enviado para a loja."
+    );
+}
+
+// ============================================================
+// FINALIZAR PEDIDO - PAGAMENTO NA ENTREGA
+// ============================================================
+
+async function finalizarPedido(
+    client,
+    chatId,
+    sessao
+) {
+
+    try {
+
+        if (
+            !sessao.pedido ||
+            sessao.pedido.length === 0
+        ) {
+
+            throw new Error(
+                "Pedido sem itens."
+            );
+        }
+
+        const c =
+            sessao.cliente;
+
+        if (!c.nome) {
+
+            throw new Error(
+                "Cliente sem nome."
+            );
+        }
+
+        if (!c.endereco) {
+
+            throw new Error(
+                "Cliente sem endereço."
+            );
+        }
+
+        if (!c.pagamento) {
+
+            throw new Error(
+                "Pagamento não definido."
+            );
+        }
+
+        // ====================================================
+        // ENVIA PARA LOJA
+        // ====================================================
+
+        await enviarPedidoParaLoja(
+            client,
+            chatId,
+            sessao
+        );
+
+        const total =
+            totalPedido(
+                sessao.pedido
+            );
+
+        await enviarMensagem(
+            client,
+            chatId,
+
+            "✅ *Pedido confirmado!*\n\n" +
+
+            resumoPedido(
+                sessao.pedido
+            ) +
+
+            "\n\n" +
+
+            `*Total: R$ ${total.toFixed(2)}*\n` +
+
+            `Pagamento: ${c.pagamento}\n\n` +
+
+            `Obrigado, ${c.nome}! ❤️\n\n` +
+
+            "Já estamos preparando seu pedido. 🍦"
+        );
+
+        sessao.pedidoFinalizado =
+            true;
+
+        sessao.etapa =
+            "finalizado";
+
+        console.log(
+            "✅ Pedido finalizado - pagamento na entrega."
+        );
+
+    } catch (err) {
+
+        console.error(
+            "❌ Erro ao finalizar pedido:"
+        );
+
+        console.error(err);
 
         try {
 
             await enviarMensagem(
                 client,
-                msg.from,
-                "Ops, tive um problema aqui 😅\n\n" +
-                "Não consegui processar sua mensagem.\n\n" +
-                "Tente novamente ou digite *cancelar* " +
-                "para começar de novo."
+                chatId,
+
+                "Tivemos um problema ao finalizar seu pedido 😕\n\n" +
+
+                "Por favor, tente novamente."
             );
 
         } catch (erroEnvio) {
 
             console.error(
-                "❌ Não foi possível enviar a mensagem de erro:"
+                "❌ Não foi possível avisar o cliente:"
             );
 
             console.error(
@@ -547,8 +1371,249 @@ client.on("message", async (msg) => {
             );
         }
     }
-});
+}
 
+// ============================================================
+// CLIENTE WHATSAPP
+// ============================================================
+
+const client =
+    new Client({
+
+        authStrategy:
+            new LocalAuth(),
+
+        puppeteer: {
+
+            headless: true,
+
+            args: [
+
+                "--no-sandbox",
+
+                "--disable-setuid-sandbox"
+
+            ]
+
+        }
+
+    });
+
+// ============================================================
+// EVENTOS WHATSAPP
+// ============================================================
+
+client.on(
+    "qr",
+    qr => {
+
+        console.log(
+            "📱 Escaneie o QR Code:"
+        );
+
+        qrcode.generate(
+            qr,
+            {
+                small: true
+            }
+        );
+    }
+);
+
+client.on(
+    "authenticated",
+    () => {
+
+        console.log(
+            "🔐 WhatsApp autenticado."
+        );
+    }
+);
+
+client.on(
+    "ready",
+    () => {
+
+        console.log(
+            "================================"
+        );
+
+        console.log(
+            "🍦 BOT DA SORVETERIA"
+        );
+
+        console.log(
+            "✅ WhatsApp conectado!"
+        );
+
+        console.log(
+            "================================"
+        );
+    }
+);
+
+client.on(
+    "auth_failure",
+    msg => {
+
+        console.error(
+            "❌ Falha na autenticação:"
+        );
+
+        console.error(msg);
+    }
+);
+
+client.on(
+    "disconnected",
+    reason => {
+
+        console.warn(
+            "⚠️ WhatsApp desconectado."
+        );
+
+        console.warn(
+            "Motivo:",
+            reason
+        );
+    }
+);
+
+client.on(
+    "change_state",
+    state => {
+
+        console.log(
+            "📱 Estado:",
+            state
+        );
+    }
+);
+
+client.on(
+    "loading_screen",
+    (percent, message) => {
+
+        console.log(
+            `⏳ WhatsApp: ${percent}% - ${message}`
+        );
+    }
+);
+
+// ============================================================
+// RECEBIMENTO DE MENSAGENS
+// ============================================================
+
+client.on(
+    "message",
+    async msg => {
+
+        try {
+
+            // =================================================
+            // DUPLICADA
+            // =================================================
+
+            if (
+                mensagemJaProcessada(msg)
+            ) {
+
+                console.log(
+                    "⚠️ Mensagem duplicada ignorada."
+                );
+
+                return;
+            }
+
+            // =================================================
+            // GRUPOS
+            // =================================================
+
+            if (
+                msg.from &&
+                msg.from.endsWith("@g.us")
+            ) {
+
+                return;
+            }
+
+            // =================================================
+            // IGNORA MENSAGEM DA PRÓPRIA LOJA
+            // =================================================
+
+            if (
+                msg.from ===
+                `${NUMERO_LOJA}@c.us`
+            ) {
+
+                return;
+            }
+
+            const chatId =
+                msg.from;
+
+            const texto =
+                (
+                    msg.body || ""
+                ).trim();
+
+            const sessao =
+                getSessao(chatId);
+
+            console.log(
+                `📩 Mensagem [${msg.id?.id}]: "${texto}"`
+            );
+
+            await tratarMensagem(
+                client,
+                chatId,
+                texto,
+                sessao,
+                msg
+            );
+
+        } catch (err) {
+
+            console.error(
+                "================================"
+            );
+
+            console.error(
+                "❌ ERRO AO TRATAR MENSAGEM"
+            );
+
+            console.error(err);
+
+            console.error(
+                "================================"
+            );
+
+            try {
+
+                await enviarMensagem(
+                    client,
+                    msg.from,
+
+                    "Ops, tive um problema aqui 😅\n\n" +
+
+                    "Não consegui processar sua mensagem.\n\n" +
+
+                    "Tente novamente ou digite *cancelar*."
+                );
+
+            } catch (erroEnvio) {
+
+                console.error(
+                    "❌ Erro ao enviar mensagem de erro:"
+                );
+
+                console.error(
+                    erroEnvio
+                );
+            }
+        }
+    }
+);
 
 // ============================================================
 // MÁQUINA DE ESTADOS
@@ -562,11 +1627,11 @@ async function tratarMensagem(
     msg
 ) {
 
-    const textoLower = texto.toLowerCase();
-
+    const textoLower =
+        texto.toLowerCase();
 
     // ========================================================
-    // COMANDOS UNIVERSAIS
+    // CANCELAR
     // ========================================================
 
     if (
@@ -575,25 +1640,28 @@ async function tratarMensagem(
         textoLower === "recomecar"
     ) {
 
-        resetarSessao(chatId);
+        resetarSessao(
+            chatId
+        );
 
         await enviarMensagem(
             client,
             chatId,
+
             "Pedido cancelado. ❌\n\n" +
-            "Digite qualquer mensagem para começar novamente. 🍦"
+
+            "Digite qualquer mensagem " +
+            "para começar novamente. 🍦"
         );
 
         return;
     }
 
-
     // ========================================================
-    // MÁQUINA DE ESTADOS
+    // ESTADOS
     // ========================================================
 
     switch (sessao.etapa) {
-
 
         // ====================================================
         // INÍCIO
@@ -604,18 +1672,22 @@ async function tratarMensagem(
             await enviarMensagem(
                 client,
                 chatId,
+
                 "Olá! Tudo bem? 🍦\n\n" +
+
                 "Bem-vindo(a) à nossa sorveteria!\n\n" +
+
                 "Segue nosso cardápio:"
             );
 
-
-            // -----------------------------------------------
-            // ENVIO DO CARDÁPIO
-            // -----------------------------------------------
+            // =================================================
+            // CARDÁPIO EM IMAGEM
+            // =================================================
 
             if (
-                fs.existsSync(CAMINHO_MENU)
+                fs.existsSync(
+                    CAMINHO_MENU
+                )
             ) {
 
                 try {
@@ -625,72 +1697,70 @@ async function tratarMensagem(
                             CAMINHO_MENU
                         );
 
-
                     await enviarMensagem(
                         client,
                         chatId,
                         media,
                         {
+
                             caption:
                                 "📋 *Nosso Cardápio* 🍦\n\n" +
+
                                 "Escolha o número do item que deseja!"
+
                         }
                     );
-
 
                 } catch (err) {
 
                     console.error(
-                        "❌ Erro ao enviar imagem do cardápio:"
+                        "❌ Erro ao enviar cardápio:"
                     );
 
                     console.error(err);
 
-
-                    // Fallback para texto
                     await enviarMensagem(
                         client,
                         chatId,
+
                         "Não consegui enviar a imagem do cardápio 😕\n\n" +
-                        "Mas você pode escolher pelos itens abaixo:\n\n" +
+
                         formatarCardapio()
                     );
                 }
 
-
             } else {
-
-                console.warn(
-                    "⚠️ Imagem do cardápio não encontrada."
-                );
-
 
                 await enviarMensagem(
                     client,
                     chatId,
-                    "Não consegui encontrar a imagem do cardápio 😕\n\n" +
-                    "Mas você pode escolher pelos itens abaixo:\n\n" +
+
+                    "Cardápio em imagem indisponível 😕\n\n" +
+
                     formatarCardapio()
                 );
             }
 
+            // =================================================
+            // INSTRUÇÕES
+            // =================================================
 
             await enviarMensagem(
                 client,
                 chatId,
-                "Digite o *número* do item que deseja, " +
-                "um de cada vez.\n\n" +
+
+                "Digite o *número* do item que deseja.\n\n" +
+
                 "Quando terminar, digite *fim*.\n\n" +
-                "A qualquer momento digite *cancelar* " +
-                "para recomeçar."
+
+                "A qualquer momento digite *cancelar*."
             );
 
-
-            sessao.etapa = "pedido";
+            sessao.etapa =
+                "pedido";
 
             break;
         }
-
 
         // ====================================================
         // PEDIDO
@@ -698,11 +1768,13 @@ async function tratarMensagem(
 
         case "pedido": {
 
-            // -----------------------------------------------
-            // FINALIZAR ESCOLHA DOS PRODUTOS
-            // -----------------------------------------------
+            // =================================================
+            // FINALIZAR SELEÇÃO
+            // =================================================
 
-            if (textoLower === "fim") {
+            if (
+                textoLower === "fim"
+            ) {
 
                 if (
                     sessao.pedido.length === 0
@@ -711,73 +1783,76 @@ async function tratarMensagem(
                     await enviarMensagem(
                         client,
                         chatId,
-                        "Você ainda não escolheu nenhum item. 😅\n\n" +
-                        "Digite o número de um item do cardápio."
+
+                        "Você ainda não escolheu nenhum item. 😅"
                     );
 
                     return;
                 }
 
-
                 await enviarMensagem(
                     client,
                     chatId,
+
                     "🧾 *Resumo do pedido*\n\n" +
-                    resumoPedido(sessao.pedido) +
-                    "\n\n" +
-                    `*Total: R$ ${totalPedido(
+
+                    resumoPedido(
                         sessao.pedido
-                    ).toFixed(2)}*` +
+                    ) +
+
                     "\n\n" +
-                    "Agora preciso de alguns dados.\n\n" +
+
+                    `*Total: R$ ${totalPedido(sessao.pedido).toFixed(2)}*` +
+
+                    "\n\n" +
+
                     "Qual é o seu *nome*?"
                 );
 
-
-                sessao.etapa = "nome";
+                sessao.etapa =
+                    "nome";
 
                 return;
             }
 
+            // =================================================
+            // BUSCAR ITEM
+            // =================================================
 
-            // -----------------------------------------------
-            // BUSCAR PRODUTO
-            // -----------------------------------------------
-
-            const item = buscarItem(texto);
-
+            const item =
+                buscarItem(texto);
 
             if (!item) {
 
                 await enviarMensagem(
                     client,
                     chatId,
+
                     "Não encontrei esse item 🤔\n\n" +
-                    "Digite o número exatamente como aparece " +
-                    "no cardápio.\n\n" +
-                    "Ou digite *fim* para encerrar o pedido."
+
+                    "Digite o número exatamente como aparece no cardápio.\n\n" +
+
+                    "Ou digite *fim*."
                 );
 
                 return;
             }
 
+            sessao.itemPendente =
+                item;
 
-            // Guarda produto temporariamente
-            sessao._itemPendente = item;
-
-            sessao.etapa = "quantidade";
-
+            sessao.etapa =
+                "quantidade";
 
             await enviarMensagem(
                 client,
                 chatId,
+
                 `Quantas unidades de "${item.nome}" você quer?`
             );
 
-
             break;
         }
-
 
         // ====================================================
         // QUANTIDADE
@@ -785,7 +1860,6 @@ async function tratarMensagem(
 
         case "quantidade": {
 
-            // Somente números inteiros
             if (
                 !/^\d+$/.test(texto)
             ) {
@@ -793,18 +1867,18 @@ async function tratarMensagem(
                 await enviarMensagem(
                     client,
                     chatId,
+
                     "Me manda apenas um número.\n\n" +
+
                     "Exemplo: *1*, *2* ou *3*."
                 );
 
                 return;
             }
 
+            const qtd =
+                Number(texto);
 
-            const qtd = Number(texto);
-
-
-            // Limite de quantidade
             if (
                 qtd <= 0 ||
                 qtd > 50
@@ -813,17 +1887,15 @@ async function tratarMensagem(
                 await enviarMensagem(
                     client,
                     chatId,
+
                     "A quantidade deve estar entre *1 e 50*."
                 );
 
                 return;
             }
 
-
-            // Proteção contra item inexistente
             const item =
-                sessao._itemPendente;
-
+                sessao.itemPendente;
 
             if (!item) {
 
@@ -831,46 +1903,47 @@ async function tratarMensagem(
                     "❌ Item pendente não encontrado."
                 );
 
-
-                sessao.etapa = "pedido";
+                sessao.etapa =
+                    "pedido";
 
                 await enviarMensagem(
                     client,
                     chatId,
+
                     "Tive um problema ao identificar o produto 😕\n\n" +
-                    "Escolha novamente um item do cardápio."
+
+                    "Escolha novamente."
                 );
 
                 return;
             }
 
-
-            // Adiciona ao pedido
             sessao.pedido.push({
+
                 ...item,
-                quantidade: qtd
+
+                quantidade:
+                    qtd
+
             });
 
+            sessao.itemPendente =
+                null;
 
-            // Limpa item temporário
-            sessao._itemPendente = null;
-
-            sessao.etapa = "pedido";
-
+            sessao.etapa =
+                "pedido";
 
             await enviarMensagem(
                 client,
                 chatId,
-                "Adicionado ✅\n\n" +
-                "Digite outro número do cardápio para adicionar " +
-                "mais itens.\n\n" +
-                "Ou digite *fim* para fechar o pedido."
-            );
 
+                "Adicionado ✅\n\n" +
+
+                "Digite outro número do cardápio ou *fim*."
+            );
 
             break;
         }
-
 
         // ====================================================
         // NOME
@@ -886,15 +1959,15 @@ async function tratarMensagem(
                 await enviarMensagem(
                     client,
                     chatId,
-                    "Digite seu nome corretamente, por favor 😊\n\n" +
+
+                    "Digite seu nome corretamente 😊\n\n" +
+
                     "O nome deve ter entre 2 e 100 caracteres."
                 );
 
                 return;
             }
 
-
-            // Precisa conter pelo menos uma letra
             if (
                 !/[a-zA-ZÀ-ÿ]/.test(texto)
             ) {
@@ -902,31 +1975,34 @@ async function tratarMensagem(
                 await enviarMensagem(
                     client,
                     chatId,
+
                     "O nome precisa conter letras 😊"
                 );
 
                 return;
             }
 
+            sessao.cliente.nome =
+                texto;
 
-            sessao.cliente.nome = texto;
-
-            sessao.etapa = "aniversario";
-
+            sessao.etapa =
+                "aniversario";
 
             await enviarMensagem(
                 client,
                 chatId,
+
                 "Qual sua data de aniversário? 🎂\n\n" +
-                "Formato: *dd/mm*\n" +
+
+                "Formato: *dd/mm*\n\n" +
+
                 "Exemplo: *15/03*\n\n" +
+
                 "Se preferir não informar, digite *pular*."
             );
 
-
             break;
         }
-
 
         // ====================================================
         // ANIVERSÁRIO
@@ -944,40 +2020,41 @@ async function tratarMensagem(
             } else {
 
                 if (
-                    !validarAniversario(texto)
+                    !validarAniversario(
+                        texto
+                    )
                 ) {
 
                     await enviarMensagem(
                         client,
                         chatId,
+
                         "Data inválida 😅\n\n" +
-                        "Use o formato *dd/mm*.\n\n" +
+
+                        "Use *dd/mm*.\n\n" +
+
                         "Exemplo: *15/03*."
                     );
 
                     return;
                 }
 
-
                 sessao.cliente.aniversario =
                     texto;
             }
 
-
-            sessao.etapa = "endereco";
-
+            sessao.etapa =
+                "endereco";
 
             await enviarMensagem(
                 client,
                 chatId,
-                "Agora me manda o *endereço completo* " +
-                "para entrega. 📍"
-            );
 
+                "Agora me manda o *endereço completo* para entrega. 📍"
+            );
 
             break;
         }
-
 
         // ====================================================
         // ENDEREÇO
@@ -993,14 +2070,16 @@ async function tratarMensagem(
                 await enviarMensagem(
                     client,
                     chatId,
-                    "Por favor, informe um endereço válido 📍\n\n" +
+
+                    "Informe um endereço válido 📍\n\n" +
+
                     "Exemplo:\n" +
+
                     "Rua das Flores, 123 - Centro"
                 );
 
                 return;
             }
-
 
             if (
                 texto.length > 250
@@ -1009,32 +2088,34 @@ async function tratarMensagem(
                 await enviarMensagem(
                     client,
                     chatId,
+
                     "O endereço ficou muito grande 😅\n\n" +
-                    "Tente enviar um endereço de até 250 caracteres."
+
+                    "Máximo: 250 caracteres."
                 );
 
                 return;
             }
 
-
             sessao.cliente.endereco =
                 texto;
 
-            sessao.etapa = "pagamento";
-
+            sessao.etapa =
+                "pagamento";
 
             await enviarMensagem(
                 client,
                 chatId,
+
                 "Qual a forma de pagamento? 💳\n\n" +
+
                 "*1* - Pix\n" +
+
                 "*2* - Pagar na entrega"
             );
 
-
             break;
         }
-
 
         // ====================================================
         // PAGAMENTO
@@ -1042,32 +2123,62 @@ async function tratarMensagem(
 
         case "pagamento": {
 
-            // -----------------------------------------------
+            // =================================================
             // PIX
-            // -----------------------------------------------
+            // =================================================
 
-            if (texto === "1") {
+            if (
+                texto === "1"
+            ) {
 
                 sessao.cliente.pagamento =
                     "Pix";
 
-                sessao.etapa =
-                    "aguardando_pix";
+                try {
 
+                    await enviarMensagem(
+                        client,
+                        chatId,
 
-                await enviarMensagem(
-                    client,
-                    chatId,
-                    `💳 *Pagamento via Pix*\n\n` +
-                    `Chave Pix: *${CHAVE_PIX}*\n\n` +
-                    "Após realizar o pagamento, envie o " +
-                    "comprovante ou digite *ok* para confirmar."
-                );
+                        "Só um momento... 💳\n\n" +
 
+                        "Estou gerando seu pagamento PIX."
+                    );
 
-            // -----------------------------------------------
+                    await enviarPix(
+                        client,
+                        chatId,
+                        sessao
+                    );
+
+                } catch (err) {
+
+                    console.error(
+                        "❌ Erro ao gerar PIX:"
+                    );
+
+                    console.error(err);
+
+                    sessao.etapa =
+                        "pagamento";
+
+                    await enviarMensagem(
+                        client,
+                        chatId,
+
+                        "Não consegui gerar o PIX agora 😕\n\n" +
+
+                        "Tente novamente escolhendo:\n\n" +
+
+                        "*1* - Pix\n" +
+
+                        "*2* - Pagar na entrega"
+                    );
+                }
+
+            // =================================================
             // PAGAMENTO NA ENTREGA
-            // -----------------------------------------------
+            // =================================================
 
             } else if (
                 texto === "2"
@@ -1076,29 +2187,28 @@ async function tratarMensagem(
                 sessao.cliente.pagamento =
                     "Pagamento na entrega";
 
-
                 await finalizarPedido(
                     client,
                     chatId,
                     sessao
                 );
 
-
             } else {
 
                 await enviarMensagem(
                     client,
                     chatId,
+
                     "Escolha uma opção válida:\n\n" +
+
                     "*1* - Pix\n" +
+
                     "*2* - Pagar na entrega"
                 );
             }
 
-
             break;
         }
-
 
         // ====================================================
         // AGUARDANDO PIX
@@ -1106,34 +2216,37 @@ async function tratarMensagem(
 
         case "aguardando_pix": {
 
-            if (
-                msg.hasMedia ||
-                textoLower === "ok" ||
-                textoLower === "pago" ||
-                textoLower === "enviado"
-            ) {
+            await enviarMensagem(
+                client,
+                chatId,
 
-                await finalizarPedido(
-                    client,
-                    chatId,
-                    sessao
-                );
+                "⏳ Ainda estou aguardando a confirmação do pagamento.\n\n" +
 
-            } else {
+                "Assim que o PIX for confirmado, " +
 
-                await enviarMensagem(
-                    client,
-                    chatId,
-                    "Assim que realizar o pagamento, " +
-                    "me envie o comprovante 📸\n\n" +
-                    "Ou digite *ok* para confirmar."
-                );
-            }
-
+                "seu pedido será enviado automaticamente para a loja. ✅"
+            );
 
             break;
         }
 
+        // ====================================================
+        // PAGAMENTO CONFIRMADO
+        // ====================================================
+
+        case "pagamento_confirmado": {
+
+            await enviarMensagem(
+                client,
+                chatId,
+
+                "Seu pagamento já foi confirmado! ✅\n\n" +
+
+                "Seu pedido está sendo preparado. 🍦"
+            );
+
+            break;
+        }
 
         // ====================================================
         // FINALIZADO
@@ -1144,15 +2257,16 @@ async function tratarMensagem(
             await enviarMensagem(
                 client,
                 chatId,
+
                 "Seu pedido já está com a gente! 🍨\n\n" +
+
                 "Se quiser fazer um novo pedido, " +
+
                 "digite *recomeçar*."
             );
 
-
             break;
         }
-
 
         // ====================================================
         // ESTADO DESCONHECIDO
@@ -1164,222 +2278,418 @@ async function tratarMensagem(
                 `⚠️ Estado desconhecido: ${sessao.etapa}`
             );
 
-
             resetarSessao(
                 chatId
             );
 
-
             await enviarMensagem(
                 client,
                 chatId,
+
                 "Vamos começar de novo! 🍦\n\n" +
+
                 "Digite qualquer mensagem para iniciar."
             );
         }
     }
 }
 
+// ============================================================
+// EXPRESS
+// ============================================================
+
+const app =
+    express();
 
 // ============================================================
-// FINALIZAR PEDIDO
+// WEBHOOK ABACATEPAY
 // ============================================================
 
-async function finalizarPedido(
-    client,
-    chatId,
-    sessao
-) {
+// IMPORTANTE:
+//
+// express.raw() precisa ser usado neste endpoint
+// antes de qualquer parser JSON.
+//
+// A assinatura HMAC é calculada sobre o corpo RAW.
+//
+// ============================================================
+
+app.post(
+
+    "/webhooks/abacatepay",
+
+    express.raw({
+        type: "application/json"
+    }),
+
+    async (req, res) => {
+
+        try {
+
+            // =================================================
+            // SECRET DA URL
+            // =================================================
+
+            const secret =
+                req.query.webhookSecret;
+
+            if (
+                secret !==
+                ABACATEPAY_WEBHOOK_SECRET
+            ) {
+
+                console.warn(
+                    "🚫 Webhook rejeitado: secret inválido."
+                );
+
+                return res
+                    .status(401)
+                    .json({
+                        error:
+                            "Unauthorized"
+                    });
+            }
+
+            // =================================================
+            // RAW BODY
+            // =================================================
+
+            if (
+                !Buffer.isBuffer(req.body)
+            ) {
+
+                console.error(
+                    "❌ Webhook não recebeu body RAW."
+                );
+
+                return res
+                    .status(400)
+                    .json({
+                        error:
+                            "Invalid body"
+                    });
+            }
+
+            const rawBody =
+                req.body.toString(
+                    "utf8"
+                );
+
+            // =================================================
+            // ASSINATURA
+            // =================================================
+
+            const assinatura =
+                req.headers[
+                    "x-webhook-signature"
+                ];
+
+            if (
+                !verificarAssinaturaWebhook(
+                    rawBody,
+                    assinatura
+                )
+            ) {
+
+                console.warn(
+                    "🚫 Webhook rejeitado: assinatura inválida."
+                );
+
+                return res
+                    .status(401)
+                    .json({
+                        error:
+                            "Invalid signature"
+                    });
+            }
+
+            // =================================================
+            // JSON
+            // =================================================
+
+            let evento;
+
+            try {
+
+                evento =
+                    JSON.parse(
+                        rawBody
+                    );
+
+            } catch (err) {
+
+                console.error(
+                    "❌ JSON do webhook inválido."
+                );
+
+                return res
+                    .status(400)
+                    .json({
+                        error:
+                            "Invalid JSON"
+                    });
+            }
+
+            console.log(
+                "================================"
+            );
+
+            console.log(
+                "📨 WEBHOOK ABACATEPAY"
+            );
+
+            console.log(
+                "Evento:",
+                evento.event
+            );
+
+            console.log(
+                "ID:",
+                evento.id
+            );
+
+            console.log(
+                "================================"
+            );
+
+            // =================================================
+            // ID DO EVENTO
+            // =================================================
+
+            if (!evento.id) {
+
+                console.warn(
+                    "⚠️ Webhook sem ID de evento."
+                );
+
+                return res
+                    .status(400)
+                    .json({
+                        error:
+                            "Event ID required"
+                    });
+            }
+
+            // =================================================
+            // IDEMPOTÊNCIA
+            // =================================================
+
+            if (
+                eventoJaProcessado(
+                    evento.id
+                )
+            ) {
+
+                console.log(
+                    "⚠️ Evento duplicado ignorado."
+                );
+
+                return res
+                    .status(200)
+                    .json({
+                        received:
+                            true
+                    });
+            }
+
+            // =================================================
+            // PIX PAGO
+            // =================================================
+
+            if (
+                evento.event === "transparent.completed" ||
+                evento.event === "billing.paid" ||
+                evento.event === "checkout.completed"
+            ) {
+
+                await processarPagamentoConfirmado(
+                    evento
+                );
+
+            } else {
+
+                console.log(
+                    "ℹ️ Evento não tratado:",
+                    evento.event
+                );
+            }
+
+            // =================================================
+            // SUCESSO
+            // =================================================
+
+            return res
+                .status(200)
+                .json({
+                    received:
+                        true
+                });
+
+        } catch (err) {
+
+            console.error(
+                "================================"
+            );
+
+            console.error(
+                "❌ ERRO NO WEBHOOK"
+            );
+
+            console.error(err);
+
+            console.error(
+                "================================"
+            );
+
+            return res
+                .status(500)
+                .json({
+                    error:
+                        "Internal server error"
+                });
+        }
+    }
+);
+
+// ============================================================
+// HEALTH CHECK
+// ============================================================
+
+app.get(
+    "/",
+    (req, res) => {
+
+        let whatsappStatus =
+            "starting";
+
+        try {
+
+            if (
+                client.info
+            ) {
+
+                whatsappStatus =
+                    "connected";
+            }
+
+        } catch {
+            whatsappStatus =
+                "starting";
+        }
+
+        res.json({
+
+            status:
+                "online",
+
+            bot:
+                "sorveteria",
+
+            whatsapp:
+                whatsappStatus
+
+        });
+    }
+);
+
+// ============================================================
+// TRATAMENTO DE ERROS DO EXPRESS
+// ============================================================
+
+app.use(
+    (err, req, res, next) => {
+
+        console.error(
+            "❌ Erro no Express:"
+        );
+
+        console.error(err);
+
+        if (
+            res.headersSent
+        ) {
+
+            return next(err);
+        }
+
+        res
+            .status(500)
+            .json({
+                error:
+                    "Internal server error"
+            });
+    }
+);
+
+// ============================================================
+// INICIALIZAÇÃO
+// ============================================================
+
+async function iniciar() {
 
     try {
 
-        // -----------------------------------------------
-        // VALIDAÇÕES
-        // -----------------------------------------------
-
-        if (
-            !sessao.pedido ||
-            sessao.pedido.length === 0
-        ) {
-
-            throw new Error(
-                "Tentativa de finalizar pedido sem itens."
-            );
-        }
-
-
-        const total =
-            totalPedido(
-                sessao.pedido
-            );
-
-
-        const c =
-            sessao.cliente;
-
-
-        if (!c.nome) {
-            throw new Error(
-                "Cliente sem nome."
-            );
-        }
-
-
-        if (!c.endereco) {
-            throw new Error(
-                "Cliente sem endereço."
-            );
-        }
-
-
-        if (!c.pagamento) {
-            throw new Error(
-                "Forma de pagamento não definida."
-            );
-        }
-
-
-        // -----------------------------------------------
-        // NÚMERO DO CLIENTE
-        // -----------------------------------------------
-
-        const numeroClienteFormatado =
-            chatId.replace(
-                "@c.us",
-                ""
-            );
-
-
-        // -----------------------------------------------
-        // MENSAGEM PARA A LOJA
-        // -----------------------------------------------
-
-        const mensagemLoja =
-            `🍦 *NOVO PEDIDO*\n\n` +
-            `Cliente: ${c.nome}\n` +
-            `WhatsApp: ${numeroClienteFormatado}\n` +
-            `Aniversário: ${
-                c.aniversario ||
-                "não informado"
-            }\n` +
-            `Endereço: ${c.endereco}\n` +
-            `Pagamento: ${c.pagamento}\n\n` +
-            `Itens:\n` +
-            `${resumoPedido(
-                sessao.pedido
-            )}\n\n` +
-            `*Total: R$ ${total.toFixed(2)}*`;
-
-
-        // -----------------------------------------------
-        // PRIMEIRO ENVIA PARA A LOJA
-        // -----------------------------------------------
-
-        try {
-
-            await enviarMensagem(
-                client,
-                `${NUMERO_LOJA}@c.us`,
-                mensagemLoja
-            );
-
-
-        } catch (err) {
-
-            console.error(
-                "❌ ERRO CRÍTICO:"
-            );
-
-            console.error(
-                "O pedido NÃO foi enviado para a loja."
-            );
-
-            console.error(err);
-
-
-            await enviarMensagem(
-                client,
-                chatId,
-                "Seu pedido ainda não pôde ser confirmado 😕\n\n" +
-                "Tivemos um problema de comunicação com a loja.\n\n" +
-                "Por favor, tente novamente em alguns instantes."
-            );
-
-
-            return;
-        }
-
-
-        // -----------------------------------------------
-        // AGORA CONFIRMA PARA O CLIENTE
-        // -----------------------------------------------
-
-        const mensagemCliente =
-            `Pedido confirmado! ✅\n\n` +
-            `${resumoPedido(
-                sessao.pedido
-            )}\n\n` +
-            `Total: R$ ${total.toFixed(2)}\n` +
-            `Pagamento: ${c.pagamento}\n\n` +
-            `Obrigado, ${c.nome}! ❤️\n\n` +
-            `Já estamos preparando seu pedido. 🍦`;
-
-
-        try {
-
-            await enviarMensagem(
-                client,
-                chatId,
-                mensagemCliente
-            );
-
-
-        } catch (err) {
-
-            // Pedido já chegou na loja.
-            // Portanto não devemos cancelar o pedido.
-
-            console.error(
-                "⚠️ Pedido enviado para a loja, " +
-                "mas não foi possível enviar a confirmação ao cliente."
-            );
-
-            console.error(err);
-        }
-
-
-        // -----------------------------------------------
-        // FINALIZA SESSÃO
-        // -----------------------------------------------
-
-        sessao.etapa =
-            "finalizado";
-
-
         console.log(
             "================================"
         );
 
         console.log(
-            "✅ PEDIDO FINALIZADO"
-        );
-
-        console.log(
-            `Cliente: ${c.nome}`
-        );
-
-        console.log(
-            `WhatsApp: ${numeroClienteFormatado}`
-        );
-
-        console.log(
-            `Total: R$ ${total.toFixed(2)}`
+            "🚀 INICIANDO BOT"
         );
 
         console.log(
             "================================"
         );
 
+        // ====================================================
+        // CONFIGURAÇÃO
+        // ====================================================
+
+        validarConfiguracao();
+
+        console.log(
+            "✅ Configuração validada."
+        );
+
+        // ====================================================
+        // CARDÁPIO
+        // ====================================================
+
+        verificarCardapio();
+
+        // ====================================================
+        // ABACATEPAY
+        // ====================================================
+
+        await inicializarAbacatePay();
+
+        // ====================================================
+        // EXPRESS
+        // ====================================================
+
+        app.listen(
+            PORT,
+            () => {
+
+                console.log(
+                    "🌐 Servidor webhook:"
+                );
+
+                console.log(
+                    `http://localhost:${PORT}`
+                );
+
+                console.log(
+                    `POST /webhooks/abacatepay`
+                );
+            }
+        );
+
+        // ====================================================
+        // WHATSAPP
+        // ====================================================
+
+        await client.initialize();
 
     } catch (err) {
 
@@ -1388,52 +2698,7 @@ async function finalizarPedido(
         );
 
         console.error(
-            "❌ ERRO AO FINALIZAR PEDIDO"
-        );
-
-        console.error(err);
-
-        console.error(
-            "================================"
-        );
-
-
-        try {
-
-            await enviarMensagem(
-                client,
-                chatId,
-                "Tivemos um problema ao finalizar seu pedido 😕\n\n" +
-                "Por favor, tente novamente."
-            );
-
-        } catch (erroEnvio) {
-
-            console.error(
-                "❌ Também não foi possível informar o cliente:"
-            );
-
-            console.error(
-                erroEnvio
-            );
-        }
-    }
-}
-
-
-// ============================================================
-// INICIALIZAÇÃO
-// ============================================================
-
-client.initialize()
-    .catch((err) => {
-
-        console.error(
-            "================================"
-        );
-
-        console.error(
-            "❌ ERRO AO INICIAR O WHATSAPP"
+            "❌ ERRO FATAL AO INICIAR BOT"
         );
 
         console.error(err);
@@ -1443,4 +2708,39 @@ client.initialize()
         );
 
         process.exit(1);
-    });
+    }
+}
+
+// ============================================================
+// TRATAMENTO GLOBAL DE ERROS
+// ============================================================
+
+process.on(
+    "unhandledRejection",
+    error => {
+
+        console.error(
+            "❌ Unhandled Rejection:"
+        );
+
+        console.error(error);
+    }
+);
+
+process.on(
+    "uncaughtException",
+    error => {
+
+        console.error(
+            "❌ Uncaught Exception:"
+        );
+
+        console.error(error);
+    }
+);
+
+// ============================================================
+// INICIAR
+// ============================================================
+
+iniciar();
