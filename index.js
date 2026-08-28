@@ -33,41 +33,86 @@ async function bootstrap() {
 
         // 4. Registro dos listeners de mensagem do WhatsApp
         client.on("message", async (msg) => {
-            try {
-                // Prevenção de mensagens duplicadas
-                if (mensagemJaProcessada(msg)) {
-                    console.log(`⚠️ [WhatsApp] Mensagem duplicada ignorada [${msg.id?.id}].`);
-                    return;
-                }
+          try {
+              // Segurança: garante que a mensagem existe
+              if (!msg) {
+                  return;
+              }
 
-                // Ignora mensagens vindas de grupos (atendimento exclusivo no chat privado)
-                if (msg.from && msg.from.endsWith("@g.us")) {
-                    return;
-                }
+              // Ignora mensagens de status
+              if (msg.from === "status@broadcast") {
+                  console.log("ℹ️ [WhatsApp] Mensagem de status ignorada.");
+                  return;
+              }
 
-                // Ignora mensagens do próprio número de atendimento da loja
-                if (msg.from === `${config.store.numero}@c.us`) {
-                    return;
-                }
+              // Ignora mensagens sem remetente
+              if (!msg.from) {
+                  console.warn("⚠️ [WhatsApp] Mensagem sem remetente ignorada.");
+                  return;
+              }
 
-                const chatId = msg.from;
-                const texto = (msg.body || "").trim();
+              // Ignora mensagens enviadas pelo próprio bot
+              if (msg.fromMe) {
+                  return;
+              }
 
-                console.log(`📩 [WhatsApp] Mensagem de ${chatId}: "${texto}"`);
-                await processarMensagemRecebida(client, chatId, texto, msg);
+              // Prevenção de mensagens duplicadas
+              if (mensagemJaProcessada(msg)) {
+                  console.log(
+                      `⚠️ [WhatsApp] Mensagem duplicada ignorada [${msg.id?.id}].`
+                  );
+                  return;
+              }
 
-            } catch (err) {
-                console.error(`❌ [WhatsApp] Erro ao processar mensagem de ${msg.from}:`, err.message);
-                try {
-                    await client.sendMessage(
-                        msg.from,
-                        "Ops, tive um problema ao processar sua mensagem 😕\n\nPor favor, tente novamente ou digite *cancelar*."
-                    );
-                } catch (errEnvio) {
-                    console.error("❌ [WhatsApp] Falha ao enviar mensagem de erro para o cliente:", errEnvio.message);
-                }
-            }
-        });
+              // Ignora grupos
+              if (msg.from.endsWith("@g.us")) {
+                  console.log(`ℹ️ [WhatsApp] Grupo ignorado: ${msg.from}`);
+                  return;
+              }
+
+              // Ignora o próprio número da loja
+              if (msg.from === `${config.store.numero}@c.us`) {
+                  console.log("ℹ️ [WhatsApp] Mensagem do número da loja ignorada.");
+                  return;
+              }
+
+              const chatId = msg.from;
+              const texto = (msg.body || "").trim();
+
+              console.log(
+                  `📩 [WhatsApp] Mensagem de ${chatId}: "${texto}"`
+              );
+
+              await processarMensagemRecebida(
+                  client,
+                  chatId,
+                  texto,
+                  msg
+              );
+
+          } catch (err) {
+              console.error(
+                  `❌ [WhatsApp] Erro ao processar mensagem de ${msg?.from || "desconhecido"}:`,
+                  err
+              );
+
+              // Só tenta responder se existir um remetente
+              if (msg?.from) {
+                  try {
+                      await client.sendMessage(
+                          msg.from,
+                          "Ops, tive um problema ao processar sua mensagem 😕\n\n" +
+                          "Por favor, tente novamente ou digite *cancelar*."
+                      );
+                  } catch (errEnvio) {
+                      console.error(
+                          "❌ [WhatsApp] Falha ao enviar mensagem de erro para o cliente:",
+                          errEnvio.message
+                      );
+                  }
+              }
+          }
+      });
 
         // 5. Inicialização do cliente WhatsApp
         console.log("📱 [WhatsApp] Inicializando cliente WhatsApp...");

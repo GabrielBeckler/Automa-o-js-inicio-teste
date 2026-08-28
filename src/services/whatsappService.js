@@ -137,7 +137,7 @@ async function enviarMensagem(
     chatId,
     conteudo,
     opcoes = {}
-) {
+    ) {
 
     if (!client) {
         throw new Error(
@@ -151,9 +151,7 @@ async function enviarMensagem(
         );
     }
 
-    if (
-        whatsappStatus !== "connected"
-    ) {
+    if (whatsappStatus !== "connected") {
         throw new Error(
             `WhatsApp não está conectado. Status atual: ${whatsappStatus}`
         );
@@ -173,22 +171,37 @@ async function enviarMensagem(
 
         await esperar(atraso);
 
-        return await client.sendMessage(
-            chatId,
-            conteudo,
-            opcoes
-        );
-
-    } catch (err) {
-
-        console.error(
-            `❌ [WhatsApp] Erro ao enviar mensagem para ${chatId}:`,
-            err.message
-        );
-
-        throw err;
-    }
-}
+       // ==================================================== 
+       // RESOLVER DESTINATÁRIO 
+       // ==================================================== 
+       let destino = chatId; 
+       /* * Se recebemos um número @c.us, tentamos localizar * o ID reconhecido pelo WhatsApp antes do envio. */
+        if (chatId.endsWith("@c.us")) {
+             console.log( `🔎 [WhatsApp] Resolvendo destinatário: ${chatId}` );
+              try 
+              { const numero = chatId.replace( "@c.us", "" ); 
+                const numeroId = await client.getNumberId(numero); 
+                if (numeroId) { destino = numeroId._serialized; 
+                    console.log( `✅ [WhatsApp] Destinatário resolvido: ${destino}` );
+                 } 
+                 else { 
+                    console.warn( `⚠️ [WhatsApp] Número não encontrado no WhatsApp: ${numero}` ); 
+                } } 
+              catch (erroResolucao) { 
+                console.warn( `⚠️ [WhatsApp] Não foi possível resolver ${chatId}:`, erroResolucao.message );
+                 /* * Mantemos o chatId original para permitir * que o WhatsApp tente fazer o envio. */
+                  destino = chatId; } } 
+                  // ==================================================== 
+                  // ENVIO 
+                  // ====================================================
+                   console.log( `📤 [WhatsApp] Enviando mensagem para ${destino}...` ); 
+                   const resultado = await client.sendMessage( destino, conteudo, opcoes ); 
+                   console.log( `✅ [WhatsApp] Mensagem enviada para ${destino}.` ); 
+                   return resultado; } 
+                catch (err) { 
+                    console.error( `❌ [WhatsApp] Erro ao enviar mensagem para ${chatId}:`, err.message ); throw err; 
+                } 
+            }
 
 // ============================================================
 // STATUS DO WHATSAPP

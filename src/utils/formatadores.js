@@ -62,7 +62,7 @@ function formatarMoeda(valor) {
  * @param {string} status - Status do pedido (Padrão: "PREPARANDO").
  * @returns {string} - Mensagem formatada.
  */
-function formatarMensagemGrupoPedidos(sessao, chatId, status = "PREPARANDO") {
+function formatarMensagemPedido(sessao, chatId, status = "PREPARANDO") {
     const c = sessao.cliente || {};
     const total = totalPedido(sessao.pedido);
     const numeroCliente = extrairNumeroWhatsApp(chatId);
@@ -85,5 +85,5 @@ module.exports = {
     totalPedido,
     resumoPedido,
     formatarMoeda,
-    formatarMensagemGrupoPedidos
+    formatarMensagemPedido
 };
