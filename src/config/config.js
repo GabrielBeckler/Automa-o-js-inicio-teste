@@ -20,6 +20,13 @@ const config = {
     server: {
         port: Number(process.env.PORT) || 3000
     },
+    database: {
+        host: process.env.DB_HOST || "localhost",
+        port: Number(process.env.DB_PORT) || 3306,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        name: process.env.DB_NAME
+    },
     whatsapp: {
         numeroPedidos: process.env.NUMERO_PEDIDOS
     },
@@ -58,6 +65,16 @@ function validarConfiguracao() {
 
     if (!config.whatsapp.numeroPedidos) {
         throw new Error("Configuração ausente: NUMERO_PEDIDOS não foi configurado no .env");
+    }
+
+    for (const [nome, valor] of Object.entries({
+        DB_USER: config.database.user,
+        DB_PASSWORD: config.database.password,
+        DB_NAME: config.database.name
+    })) {
+        if (!valor || String(valor).trim() === "") {
+            throw new Error(`Configuração ausente: ${nome} não foi configurado no .env`);
+        }
     }
 }
 

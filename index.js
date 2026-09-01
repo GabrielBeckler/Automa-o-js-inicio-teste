@@ -9,6 +9,7 @@ const { client } = require("./src/services/whatsappService");
 const { iniciarServidor } = require("./src/server/app");
 const { processarMensagemRecebida } = require("./src/handlers/messageHandler");
 const { mensagemJaProcessada } = require("./src/utils/idempotencia");
+const { testarConexao, pool } = require("./src/config/database");
 
 /**
  * Função de inicialização e orquestração do sistema.
@@ -22,6 +23,8 @@ async function bootstrap() {
         // 1. Validação das variáveis de ambiente e arquivos
         validarConfiguracao();
         console.log("✅ [App] Variáveis de ambiente validadas.");
+
+        await testarConexao();
 
         verificarCardapio();
 
@@ -143,6 +146,7 @@ process.on("SIGINT", async () => {
     console.log("\n🛑 [Process] Encerrando bot de forma graciosa...");
     try {
         if (client) await client.destroy();
+        await pool.end();
     } catch (_) {}
     process.exit(0);
 });
@@ -151,6 +155,7 @@ process.on("SIGTERM", async () => {
     console.log("\n🛑 [Process] Encerrando bot de forma graciosa...");
     try {
         if (client) await client.destroy();
+        await pool.end();
     } catch (_) {}
     process.exit(0);
 });

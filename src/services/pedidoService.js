@@ -18,6 +18,31 @@ const {
 const {
     ESTADOS
 } = require("../state/sessionManager");
+const {
+    criarPedido,
+    atualizarPagamentoPorPedido,
+    atualizarStatusPedido
+} = require("../repositories/pedidoRepository");
+
+async function persistirPedido(sessao, chatId, isPix) {
+    if (!sessao.pedidoDbId) {
+        sessao.pedidoDbId = await criarPedido({
+            sessao,
+            chatId,
+            transacaoId: sessao.pagamento?.id || null,
+            pagamentoStatus: isPix ? "APROVADO" : "PENDENTE"
+        });
+        console.log(`🗄️ [Pedido] Pedido ${sessao.pedidoDbId} salvo no banco.`);
+        return;
+    }
+
+    if (isPix) {
+        await atualizarPagamentoPorPedido(sessao.pedidoDbId, {
+            status: "APROVADO",
+            transacaoId: sessao.pagamento?.id || null
+        });
+    }
+}
 
 // ============================================================
 // ENVIAR PEDIDO PARA GRUPO
@@ -155,6 +180,9 @@ async function despacharPedidoConfirmado({
 
     return true;
 }
+    // Registra antes do despacho para que o pedido não se perca se o processo
+    // for interrompido após a confirmação do cliente.
+    await persistirPedido(sessao, chatId, isPix);
     // ========================================================
     // ENVIAR PEDIDO
     // ========================================================
@@ -198,6 +226,8 @@ async function despacharPedidoConfirmado({
 
     sessao.statusPedido =
         "PREPARANDO";
+
+    await atualizarStatusPedido(sessao.pedidoDbId, "PREPARANDO");
 
     // ========================================================
     // NOTIFICAR CLIENTE

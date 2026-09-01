@@ -13,7 +13,9 @@ const ESTADOS = Object.freeze({
     AGUARDANDO_PIX: "aguardando_pix",
     PAGAMENTO_CONFIRMADO: "pagamento_confirmado",
     PREPARANDO: "preparando",
-    FINALIZADO: "finalizado"
+    FINALIZADO: "finalizado",
+    TROCO: "TROCO",
+    VALOR_TROCO: "VALOR_TROCO"
 });
 
 // Mapa de sessões: chatId -> Objeto de Sessão
@@ -46,6 +48,7 @@ function criarEstruturaSessao() {
         },
         pedidoEnviadoParaGrupo: false,
         pedidoFinalizado: false,
+        pedidoDbId: null,
         criadoEm: Date.now(),
         atualizadoEm: Date.now()
     };

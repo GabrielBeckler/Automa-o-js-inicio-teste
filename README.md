@@ -29,6 +29,19 @@ npm install
 npm start
 ```
 
+### Banco de dados MySQL
+
+O banco é obrigatório para iniciar o bot. Crie as tabelas e os produtos do
+cardápio executando o script uma única vez:
+
+```bash
+mysql -u SEU_USUARIO -p < database/schema.sql
+```
+
+No `.env`, configure `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` e
+`DB_NAME`. A aplicação valida essas variáveis e testa a conexão antes de
+inicializar o WhatsApp.
+
 Na primeira execução vai aparecer um **QR code no terminal**. Escaneie com o
 WhatsApp da loja (Configurações > Aparelhos conectados > Conectar um aparelho).
 A sessão fica salva localmente (pasta `.wwebjs_auth`), então não precisa

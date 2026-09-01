@@ -7,6 +7,7 @@ const { verificarAssinaturaWebhook } = require("../services/abacatePayService");
 const { eventoJaProcessado } = require("../utils/idempotencia");
 const { ESTADOS, getSessao, obterChatPorPagamento, removerPagamentoPendente } = require("../state/sessionManager");
 const { despacharPedidoConfirmado } = require("../services/pedidoService");
+const { buscarPedidoPorTransacao } = require("../repositories/pedidoRepository");
 
 /**
  * Rota POST /webhooks/abacatepay
@@ -138,6 +139,33 @@ async function processarWebhookPagamento(evento) {
     }
 
     const sessao = getSessao(chatId);
+
+    // O mapa de sessões é propositalmente temporário. Se o processo reiniciou
+    // entre a geração do PIX e o webhook, recompõe os dados necessários a
+    // partir do pedido persistido para não perder uma venda já paga.
+    if (!sessao.pedidoDbId || sessao.pedido.length === 0) {
+        const pedidoSalvo = await buscarPedidoPorTransacao(pagamentoId);
+        if (!pedidoSalvo) {
+            console.warn(`⚠️ [Webhook] Pedido persistido não encontrado para o pagamento ${pagamentoId}.`);
+            return;
+        }
+
+        sessao.pedidoDbId = pedidoSalvo.id;
+        sessao.pedido = pedidoSalvo.itens;
+        sessao.cliente = {
+            nome: pedidoSalvo.cliente_nome,
+            aniversario: pedidoSalvo.aniversario,
+            endereco: pedidoSalvo.tipo_entrega === "RETIRADA"
+                ? "Retirada no local"
+                : pedidoSalvo.endereco_entrega,
+            pagamento: "Pix"
+        };
+        sessao.pagamento = {
+            ...sessao.pagamento,
+            id: pagamentoId,
+            status: "PAID"
+        };
+    }
 
     // 2. Verificar se o pedido já foi despachado (Prevenção de duplicidade)
     if (sessao.pedidoEnviadoParaNumero || sessao.pedidoFinalizado) {
