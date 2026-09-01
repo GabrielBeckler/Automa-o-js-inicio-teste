@@ -1,3 +1,6 @@
-2026/08/29-11:22:18.775 13282 Reusing MANIFEST /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/Local Storage/leveldb/MANIFEST-000001
-2026/08/29-11:22:18.778 13282 Recovering log #7
-2026/08/29-11:22:18.778 13282 Reusing old log /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/Local Storage/leveldb/000007.log 
+2026/08/31-21:37:54.590 6778 Reusing MANIFEST /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/Local Storage/leveldb/MANIFEST-000001
+2026/08/31-21:37:54.593 6778 Recovering log #7
+2026/08/31-21:37:54.594 6778 Reusing old log /home/gbeck/Downloads/automacao/.wwebjs_auth/session/Default/Local Storage/leveldb/000007.log 
+2026/08/31-21:38:54.596 677a Level-0 table #11: started
+2026/08/31-21:38:54.598 677a Level-0 table #11: 18182 bytes OK
+2026/08/31-21:38:54.600 677a Delete type=0 #7
